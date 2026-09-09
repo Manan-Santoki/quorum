@@ -20,7 +20,7 @@ Scribe bot ─────┘                         └── DeepSeek (minute
  /record → per-speaker WAV → chunk → transcribe → merge → minutes
 ```
 
-- **Recording** uses Pycord's native `WaveSink`, which yields one WAV per speaker — so speaker labels come for free, no diarization model.
+- **Recording** (Scribe) runs on Node.js `@discordjs/voice` + `@snazzah/davey` — the only stack that decrypts Discord's **DAVE** (voice end-to-end encryption, mandatory since March 2026, which broke every Python voice-receive library). It captures one track per speaker, so speaker labels come for free — no diarization model.
 - Each speaker track is re-encoded to 16 kHz mono and split into ≤8-minute chunks (keeps every upload under Groq's 25 MB limit); chunk timestamps are offset back to the meeting clock so the merged transcript stays correctly ordered across speakers.
 - **Transcription** and **minutes** are pluggable (see providers below); defaults are Groq `whisper-large-v3-turbo` and DeepSeek `deepseek-v4-flash`.
 
@@ -28,7 +28,7 @@ Scribe bot ─────┘                         └── DeepSeek (minute
 
 - Docker + Docker Compose
 - Two Discord applications (two bot tokens)
-- A **Groq** API key (transcription) and a **DeepSeek** API key (minutes). OpenRouter or local `faster-whisper` can replace either.
+- A **Groq** API key (transcription) and a **DeepSeek** API key (minutes). OpenRouter can replace either.
 - (Optional) A Google service-account key for Google Calendar push.
 
 ## Quick start
@@ -79,7 +79,7 @@ Set in `.env`, no code changes:
 
 - `TRANSCRIBE_PROVIDER=groq` (default) — needs `GROQ_API_KEY`. `whisper-large-v3-turbo`, ~$0.04/audio-hour.
 - `TRANSCRIBE_PROVIDER=openrouter` — needs `OPENROUTER_API_KEY`; set `OPENROUTER_TRANSCRIBE_MODEL`.
-- `TRANSCRIBE_PROVIDER=faster_whisper` — fully local/offline. Add `RUN pip install "faster-whisper>=1.2.1"` to `apps/scribe_bot/Dockerfile` and rebuild. GPU-less VPS: keep `FASTER_WHISPER_MODEL=distil-large-v3` or smaller (large-v3 on CPU is slow).
+  (The Node Scribe supports `groq` and `openrouter`; local `faster-whisper` is not available in the Node recorder.)
 - `MINUTES_PROVIDER=deepseek` (default) — needs `DEEPSEEK_API_KEY`. `deepseek-v4-flash`, 1M context.
 - `MINUTES_PROVIDER=openrouter` — routes minutes through OpenRouter instead.
 
@@ -103,7 +103,7 @@ Scribe posts a visible "🔴 Recording started" notice when recording begins. Re
 ```
 packages/quorum_shared/   config, db models, gcal, transcription+minutes providers
 apps/scheduler_bot/       events cog, APScheduler reminders, FastAPI iCal feed
-apps/scribe_bot/          record cog, audio→transcript→minutes pipeline
+apps/scribe_bot/          Node.js recorder (@discordjs/voice + davey), audio→transcript→minutes pipeline
 docker-compose.yml        postgres + both bots (+ adminer under `--profile dev`)
 ```
 
@@ -111,7 +111,7 @@ docker-compose.yml        postgres + both bots (+ adminer under `--profile dev`)
 
 - Schema is bootstrapped with `create_all`; add Alembic before production schema changes.
 - Per-speaker transcription bills each track's full duration; a VAD-based per-utterance extraction (preserving offsets) would cut cost — good first contribution.
-- Built on: [Pycord](https://pycord.dev) (MIT), [APScheduler](https://apscheduler.readthedocs.io) (MIT), Groq / DeepSeek / OpenRouter APIs, ffmpeg. Inspired by [Craig](https://craig.chat) for the per-track model.
+- Built on: **Scheduler** — [Pycord](https://pycord.dev) + [APScheduler](https://apscheduler.readthedocs.io) (Python); **Scribe** — [discord.js](https://discord.js.org) + [@discordjs/voice](https://github.com/discordjs/discord.js/tree/main/packages/voice) + [@snazzah/davey](https://github.com/snazzah/davey) (Node, DAVE-capable); Groq / DeepSeek / OpenRouter APIs, ffmpeg. Same recording approach as [Craig](https://craig.chat).
 
 ## License
 
