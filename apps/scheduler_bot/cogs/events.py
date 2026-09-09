@@ -20,7 +20,31 @@ from quorum_shared.db import session_scope
 from quorum_shared.models import Event, GuildSettings, Rsvp, RsvpStatus
 
 import reminders
-from util import fmt_local, get_tz, parse_duration_minutes, to_discord_ts
+from util import fmt_local, get_tz, parse_duration_minutes, to_discord_ts, world_clock
+
+# Curated timezone choices for the picker (Discord selects cap at 25 options).
+TIMEZONES = [
+    ("UTC", "UTC"),
+    ("US Pacific (PT)", "America/Los_Angeles"),
+    ("US Arizona (MST)", "America/Phoenix"),
+    ("US Mountain (MT)", "America/Denver"),
+    ("US Central (CT)", "America/Chicago"),
+    ("US Eastern (ET)", "America/New_York"),
+    ("Brazil (BRT)", "America/Sao_Paulo"),
+    ("UK (GMT/BST)", "Europe/London"),
+    ("Central Europe (CET)", "Europe/Paris"),
+    ("Eastern Europe (EET)", "Europe/Athens"),
+    ("Gulf (GST)", "Asia/Dubai"),
+    ("India (IST)", "Asia/Kolkata"),
+    ("Bangladesh (BST)", "Asia/Dhaka"),
+    ("Thailand (ICT)", "Asia/Bangkok"),
+    ("Singapore (SGT)", "Asia/Singapore"),
+    ("China (CST)", "Asia/Shanghai"),
+    ("Japan (JST)", "Asia/Tokyo"),
+    ("Korea (KST)", "Asia/Seoul"),
+    ("Sydney (AEST)", "Australia/Sydney"),
+    ("New Zealand (NZST)", "Pacific/Auckland"),
+]
 
 _GUILD_IDS = settings.dev_guild_ids or None  # None => global registration
 
@@ -58,10 +82,12 @@ def build_event_embed(ev: Event, counts: dict[str, int], tz_name: str) -> discor
     color = discord.Color.dark_gray() if ev.cancelled else discord.Color.blurple()
     title = ("❌ [Cancelled] " if ev.cancelled else "📅 ") + ev.title
     embed = discord.Embed(title=title, description=(ev.description or "")[:2000], color=color)
-    embed.add_field(name="When", value=to_discord_ts(ev.start_at), inline=False)
     embed.add_field(
-        name="Local", value=fmt_local(ev.start_at, tz_name), inline=True
+        name="🕒 When (your local time)",
+        value=f"{to_discord_ts(ev.start_at, 'F')} · {to_discord_ts(ev.start_at, 'R')}",
+        inline=False,
     )
+    embed.add_field(name="🌍 Time zones", value=world_clock(ev.start_at)[:1024], inline=False)
     duration = int((ev.end_at - ev.start_at).total_seconds() // 60)
     embed.add_field(name="Duration", value=f"{duration} min", inline=True)
     if ev.location:
@@ -296,12 +322,16 @@ class Events(commands.Cog):
         )
 
 
-def build_event_embed_stub(event_id, title, description, location, start, end, tz) -> discord.Embed:
+def build_event_embed_stub(event_id, title, description, location, start, end) -> discord.Embed:
     """Build the initial announcement embed (no RSVPs yet)."""
     color = discord.Color.blurple()
     embed = discord.Embed(title="📅 " + title, description=(description or "")[:2000], color=color)
-    embed.add_field(name="When", value=to_discord_ts(start), inline=False)
-    embed.add_field(name="Local", value=fmt_local(start, tz), inline=True)
+    embed.add_field(
+        name="🕒 When (your local time)",
+        value=f"{to_discord_ts(start, 'F')} · {to_discord_ts(start, 'R')}",
+        inline=False,
+    )
+    embed.add_field(name="🌍 Time zones", value=world_clock(start)[:1024], inline=False)
     duration = int((end - start).total_seconds() // 60)
     embed.add_field(name="Duration", value=f"{duration} min", inline=True)
     if location:
@@ -322,6 +352,7 @@ async def create_event_flow(
     def _persist() -> tuple[int, str]:
         with session_scope() as s:
             gs = _get_or_create_settings(s, guild_id)
+            gs.timezone = tz_name  # remember as the guild's default for next time
             gcal_id = gs.gcal_id
             ev = Event(
                 guild_id=guild_id,
@@ -350,7 +381,7 @@ async def create_event_flow(
 
     event_id, offsets = await asyncio.to_thread(_persist)
 
-    embed = build_event_embed_stub(event_id, title, description, location, start_utc, end_utc, tz_name)
+    embed = build_event_embed_stub(event_id, title, description, location, start_utc, end_utc)
     msg = await channel.send(embed=embed, view=RsvpView(event_id))
 
     def _save_msg() -> None:
@@ -380,6 +411,7 @@ class EventCreateView(discord.ui.View):
         self.sel_day = None
         self.sel_hour = None
         self.sel_minute = 0
+        self.sel_tz = tz_name  # defaults to the guild's remembered timezone
 
         today = datetime.now(get_tz(tz_name)).date()
         day_opts = [
@@ -403,7 +435,20 @@ class EventCreateView(discord.ui.View):
         self.minute_select.callback = self._on_minute
         self.add_item(self.minute_select)
 
-        create_btn = discord.ui.Button(label="Create event", style=discord.ButtonStyle.success, row=3)
+        tz_opts = [
+            discord.SelectOption(label=label, value=iana, default=(iana == tz_name))
+            for label, iana in TIMEZONES
+        ]
+        placeholder = "🌐 Your timezone"
+        for label, iana in TIMEZONES:
+            if iana == tz_name:
+                placeholder = f"🌐 {label}"
+                break
+        self.tz_select = discord.ui.Select(placeholder=placeholder, options=tz_opts, row=3)
+        self.tz_select.callback = self._on_tz
+        self.add_item(self.tz_select)
+
+        create_btn = discord.ui.Button(label="Create event", style=discord.ButtonStyle.success, row=4)
         create_btn.callback = self._on_create
         self.add_item(create_btn)
 
@@ -433,6 +478,12 @@ class EventCreateView(discord.ui.View):
         self.sel_minute = int(self.minute_select.values[0])
         await interaction.response.defer()
 
+    async def _on_tz(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        self.sel_tz = self.tz_select.values[0]
+        await interaction.response.defer()
+
     async def _on_create(self, interaction: discord.Interaction):
         if not await self._guard(interaction):
             return
@@ -441,7 +492,7 @@ class EventCreateView(discord.ui.View):
             return
         d = date.fromisoformat(self.sel_day)
         local_dt = datetime(
-            d.year, d.month, d.day, self.sel_hour, self.sel_minute, tzinfo=get_tz(self.tz_name)
+            d.year, d.month, d.day, self.sel_hour, self.sel_minute, tzinfo=get_tz(self.sel_tz)
         )
         start_utc = local_dt.astimezone(timezone.utc)
         await interaction.response.defer()
@@ -454,14 +505,14 @@ class EventCreateView(discord.ui.View):
             location=self.location,
             start_utc=start_utc,
             duration_min=self.duration_min,
-            tz_name=self.tz_name,
+            tz_name=self.sel_tz,
         )
         self.disable_all_items()
         self.stop()
         await interaction.edit_original_response(
             content=(
                 f"✅ Created **{self.title}** (event #{event_id}) in {self.channel.mention} "
-                f"for {fmt_local(start_utc, self.tz_name)}."
+                f"for {fmt_local(start_utc, self.sel_tz)}."
             ),
             view=None,
         )

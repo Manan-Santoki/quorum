@@ -70,6 +70,27 @@ def fmt_local(dt: datetime, tz_name: str) -> str:
     return dt.astimezone(get_tz(tz_name)).strftime("%Y-%m-%d %H:%M %Z")
 
 
+# Zones shown in the "around the world" line on event embeds (label -> IANA).
+_DISPLAY_ZONES = [
+    ("UTC", "UTC"),
+    ("US-Pacific", "America/Los_Angeles"),
+    ("US-Arizona", "America/Phoenix"),
+    ("US-Eastern", "America/New_York"),
+    ("UK", "Europe/London"),
+    ("C-Europe", "Europe/Paris"),
+    ("India", "Asia/Kolkata"),
+]
+
+
+def world_clock(dt_utc: datetime) -> str:
+    """Compact multi-timezone rendering, e.g. 'India: Wed 1:30 AM IST · …'."""
+    parts = []
+    for label, iana in _DISPLAY_ZONES:
+        local = dt_utc.astimezone(get_tz(iana))
+        parts.append(f"**{label}** {local.strftime('%a %-I:%M %p %Z')}")
+    return " · ".join(parts)
+
+
 __all__ = [
     "get_tz",
     "parse_when",
@@ -77,5 +98,6 @@ __all__ = [
     "to_discord_ts",
     "humanize_offset",
     "fmt_local",
+    "world_clock",
     "timedelta",
 ]
