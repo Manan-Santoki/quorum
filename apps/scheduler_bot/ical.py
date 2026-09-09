@@ -62,6 +62,39 @@ async def calendar_feed(guild_id: int, token: str) -> Response:
     return Response(content=body, media_type="text/calendar")
 
 
+def _build_single_event(event_id: int) -> str:
+    with session_scope() as s:
+        ev = s.get(Event, event_id)
+        if ev is None or ev.cancelled:
+            raise HTTPException(status_code=404, detail="Event not found")
+        cal = Calendar()
+        cal.add("prodid", "-//Quorum//Discord Meeting Suite//EN")
+        cal.add("version", "2.0")
+        ie = ICalEvent()
+        ie.add("uid", f"quorum-{ev.id}@{ev.guild_id}")
+        ie.add("summary", ev.title)
+        if ev.description:
+            ie.add("description", ev.description)
+        if ev.location:
+            ie.add("location", ev.location)
+        ie.add("dtstart", ev.start_at)
+        ie.add("dtend", ev.end_at)
+        ie.add("dtstamp", datetime.now(timezone.utc))
+        cal.add_component(ie)
+    return cal.to_ical().decode("utf-8")
+
+
+@app.get("/event/{event_id}.ics")
+async def single_event(event_id: int) -> Response:
+    """One-tap add-to-calendar for a single event (opens in Apple/Google calendar)."""
+    body = await asyncio.to_thread(_build_single_event, event_id)
+    return Response(
+        content=body,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="event-{event_id}.ics"'},
+    )
+
+
 async def serve_ical() -> None:
     """Run uvicorn as an asyncio task alongside the Discord bot."""
     config = uvicorn.Config(

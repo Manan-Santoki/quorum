@@ -71,6 +71,8 @@ def build_event_embed(ev: Event, counts: dict[str, int], tz_name: str) -> discor
         value=f"✅ {counts['yes']}  ❔ {counts['maybe']}  ❌ {counts['no']}",
         inline=False,
     )
+    cal_url = f"{settings.public_base_url}/event/{ev.id}.ics"
+    embed.add_field(name="📆 Add to your calendar", value=f"[Tap to add this event]({cal_url})", inline=False)
     embed.set_footer(text=f"Event #{ev.id} • RSVP with the buttons below")
     return embed
 
@@ -305,6 +307,8 @@ def build_event_embed_stub(event_id, title, description, location, start, end, t
     if location:
         embed.add_field(name="Where", value=location, inline=False)
     embed.add_field(name="RSVP", value="✅ 0  ❔ 0  ❌ 0", inline=False)
+    cal_url = f"{settings.public_base_url}/event/{event_id}.ics"
+    embed.add_field(name="📆 Add to your calendar", value=f"[Tap to add this event]({cal_url})", inline=False)
     embed.set_footer(text=f"Event #{event_id} • RSVP with the buttons below")
     return embed
 
