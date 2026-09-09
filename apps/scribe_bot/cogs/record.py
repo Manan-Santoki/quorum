@@ -33,22 +33,37 @@ class Record(commands.Cog):
         # guild_id -> {"vc", "recording_id", "event_id", "text_channel_id", "autostop"}
         self.sessions: dict[int, dict] = {}
 
+    def _pick_voice_channel(self, ctx: discord.ApplicationContext):
+        """The caller's voice channel, else the most-populated one with humans."""
+        if ctx.author.voice and ctx.author.voice.channel:
+            return ctx.author.voice.channel
+        best, best_count = None, 0
+        for vc in ctx.guild.voice_channels:
+            humans = sum(1 for m in vc.members if not m.bot)
+            if humans > best_count:
+                best, best_count = vc, humans
+        return best
+
     # ----------------------------------------------------------------- start
-    @record.command(name="start", description="Join your voice channel and start recording")
+    @record.command(name="start", description="Start recording (auto-joins a voice channel that has people in it)")
     async def start(
         self,
         ctx: discord.ApplicationContext,
         event_id: discord.Option(int, "Link this recording to an event #") = None,
     ):
-        if not (ctx.author.voice and ctx.author.voice.channel):
-            await ctx.respond("Join a voice channel first, then run `/record start`.", ephemeral=True)
-            return
         if ctx.guild.id in self.sessions:
             await ctx.respond("Already recording in this server. Use `/record stop`.", ephemeral=True)
             return
 
+        voice_channel = self._pick_voice_channel(ctx)
+        if voice_channel is None:
+            await ctx.respond(
+                "No one is in a voice channel. At least one person must join a voice channel first.",
+                ephemeral=True,
+            )
+            return
+
         await ctx.defer(ephemeral=True)
-        voice_channel = ctx.author.voice.channel
 
         # Validate event linkage (must belong to this guild).
         if event_id is not None:
