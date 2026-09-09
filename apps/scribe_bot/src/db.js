@@ -6,6 +6,22 @@ import { config } from "./config.js";
 
 export const pool = new pg.Pool({ connectionString: config.databaseUrl });
 
+// An event is "due" for auto-recording when now is within [start-10m, start+30m],
+// i.e. its start_at is within [now-30m, now+10m]. Returns the soonest such event.
+export async function findDueEvent(guildId) {
+  const { rows } = await pool.query(
+    `SELECT id, channel_id
+       FROM events
+      WHERE guild_id = $1
+        AND cancelled = false
+        AND start_at BETWEEN (now() - interval '30 minutes') AND (now() + interval '10 minutes')
+      ORDER BY start_at
+      LIMIT 1`,
+    [guildId]
+  );
+  return rows[0] || null;
+}
+
 export async function eventBelongs(eventId, guildId) {
   const { rows } = await pool.query(
     "SELECT 1 FROM events WHERE id = $1 AND guild_id = $2",

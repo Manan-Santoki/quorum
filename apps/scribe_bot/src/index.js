@@ -13,7 +13,7 @@ import {
 import { config } from "./config.js";
 import { RecordingSession } from "./recorder.js";
 import { runPipeline } from "./pipeline.js";
-import { createRecording, setStatus, saveResults, eventBelongs } from "./db.js";
+import { createRecording, setStatus, saveResults, eventBelongs, findDueEvent } from "./db.js";
 
 if (!config.token) {
   console.error("DISCORD_TOKEN_SCRIBE is not set.");
@@ -73,6 +73,44 @@ function pickVoiceChannel(interaction) {
   return best;
 }
 
+// Shared by manual /record start and automatic (event-triggered) recording.
+async function startSession({ guild, voiceChannel, textChannel, startedBy, eventId, startedByMention }) {
+  const session = new RecordingSession(guild, voiceChannel);
+  await session.start();
+
+  const recordingId = await createRecording({
+    guildId: guild.id,
+    channelId: textChannel.id,
+    voiceChannelId: voiceChannel.id,
+    startedBy,
+    eventId,
+  });
+
+  const autostop = setTimeout(() => {
+    console.log(`Auto-stopping recording in guild ${guild.id} (max duration).`);
+    finishRecording(guild.id).catch((e) => console.error(e));
+  }, config.maxRecordingMinutes * 60_000);
+
+  sessions.set(guild.id, {
+    session,
+    recordingId,
+    eventId,
+    voiceChannelId: voiceChannel.id,
+    textChannel,
+    autostop,
+    emptyTimer: null,
+  });
+
+  const who = startedByMention ? ` by ${startedByMention}` : " automatically for a scheduled event";
+  await textChannel
+    .send(
+      `🔴 **Recording started** in ${voiceChannel.toString()}${who}. ` +
+        "Everyone in the channel is being recorded for meeting minutes."
+    )
+    .catch(() => {});
+  return { recordingId };
+}
+
 async function handleStart(interaction) {
   const guildId = interaction.guild.id;
   if (sessions.has(guildId)) {
@@ -92,42 +130,66 @@ async function handleStart(interaction) {
     return interaction.editReply(`No event #${eventId} in this server.`);
   }
 
-  const session = new RecordingSession(interaction.guild, voiceChannel);
   try {
-    await session.start();
+    const { recordingId } = await startSession({
+      guild: interaction.guild,
+      voiceChannel,
+      textChannel: interaction.channel,
+      startedBy: interaction.user.id,
+      eventId,
+      startedByMention: interaction.user.toString(),
+    });
+    return interaction.editReply(`Recording started (recording #${recordingId}).`);
   } catch (e) {
     console.error("failed to start recording:", e);
     return interaction.editReply(`Couldn't start recording: \`${e.message}\``);
   }
+}
 
-  const recordingId = await createRecording({
-    guildId,
-    channelId: interaction.channel.id,
-    voiceChannelId: voiceChannel.id,
-    startedBy: interaction.user.id,
-    eventId,
-  });
+// --- Auto-record: watch voice joins & channel-empty --------------------------
+const autoStarted = new Set(); // event ids already auto-recorded this process
 
-  const autostop = setTimeout(() => {
-    console.log(`Auto-stopping recording in guild ${guildId} (max duration).`);
-    finishRecording(guildId, interaction.channel).catch((e) => console.error(e));
-  }, config.maxRecordingMinutes * 60_000);
+async function maybeAutoStart(guild, voiceChannel) {
+  if (!voiceChannel || sessions.has(guild.id)) return;
+  const ev = await findDueEvent(guild.id);
+  if (!ev || autoStarted.has(ev.id)) return;
+  autoStarted.add(ev.id);
+  const textChannel = await client.channels.fetch(String(ev.channel_id)).catch(() => null);
+  if (!textChannel) {
+    autoStarted.delete(ev.id);
+    return;
+  }
+  try {
+    await startSession({
+      guild,
+      voiceChannel,
+      textChannel,
+      startedBy: client.user.id,
+      eventId: ev.id,
+    });
+    console.log(`Auto-started recording for event ${ev.id} in guild ${guild.id}`);
+  } catch (e) {
+    console.error("auto-start failed:", e);
+    autoStarted.delete(ev.id);
+  }
+}
 
-  sessions.set(guildId, {
-    session,
-    recordingId,
-    eventId,
-    textChannelId: interaction.channel.id,
-    autostop,
-  });
-
-  await interaction.channel
-    .send(
-      `🔴 **Recording started** in ${voiceChannel.toString()} by ${interaction.user.toString()}. ` +
-        "Everyone in the channel is being recorded for meeting minutes."
-    )
-    .catch(() => {});
-  return interaction.editReply(`Recording started (recording #${recordingId}).`);
+function checkAutoStop(guild) {
+  const s = sessions.get(guild.id);
+  if (!s) return;
+  const vc = guild.channels.cache.get(s.voiceChannelId);
+  const humans = vc ? vc.members.filter((m) => !m.user.bot).size : 0;
+  if (humans === 0) {
+    if (!s.emptyTimer) {
+      s.emptyTimer = setTimeout(() => {
+        console.log(`Voice channel empty; stopping recording in guild ${guild.id}`);
+        finishRecording(guild.id).catch((e) => console.error(e));
+      }, 120_000); // 2 min grace after the last person leaves
+    }
+  } else if (s.emptyTimer) {
+    clearTimeout(s.emptyTimer);
+    s.emptyTimer = null;
+  }
 }
 
 async function handleStop(interaction) {
@@ -137,15 +199,17 @@ async function handleStop(interaction) {
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await interaction.editReply("⏹️ Stopped. Transcribing and writing minutes… this can take a bit.");
-  await finishRecording(guildId, interaction.channel);
+  await finishRecording(guildId);
 }
 
-async function finishRecording(guildId, channel) {
+async function finishRecording(guildId) {
   const s = sessions.get(guildId);
   if (!s) return;
   sessions.delete(guildId);
   clearTimeout(s.autostop);
+  if (s.emptyTimer) clearTimeout(s.emptyTimer);
 
+  const channel = s.textChannel;
   const { recordingId } = s;
   let stopped;
   try {
@@ -237,6 +301,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const msg = `Something went wrong: \`${e.message}\``;
     if (interaction.deferred || interaction.replied) await interaction.editReply(msg).catch(() => {});
     else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
+});
+
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  try {
+    const guild = newState.guild || oldState.guild;
+    const member = newState.member || oldState.member;
+    // A human joined (or moved into) a voice channel → maybe auto-record.
+    if (member && !member.user.bot && newState.channelId && oldState.channelId !== newState.channelId) {
+      await maybeAutoStart(guild, newState.channel);
+    }
+    // Any change may have emptied an active recording's channel → maybe auto-stop.
+    checkAutoStop(guild);
+  } catch (e) {
+    console.error("voiceStateUpdate error:", e);
   }
 });
 
