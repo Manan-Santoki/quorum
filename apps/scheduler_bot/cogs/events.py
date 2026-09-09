@@ -46,7 +46,7 @@ TIMEZONES = [
     ("New Zealand (NZST)", "Pacific/Auckland"),
 ]
 
-_GUILD_IDS = settings.dev_guild_ids or None  # None => global registration
+_GUILD_IDS = None  # always register globally so commands work in every server
 
 
 # --------------------------------------------------------------------------- #

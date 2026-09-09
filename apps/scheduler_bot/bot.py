@@ -40,6 +40,15 @@ async def on_ready() -> None:
     asyncio.create_task(serve_ical())
     log.info("iCal feed serving on %s:%s", settings.ical_host, settings.ical_port)
 
+    # Commands are registered globally now. Clear any leftover guild-scoped
+    # commands from earlier DEV_GUILD_IDS runs so those servers track global.
+    for gid in settings.dev_guild_ids:
+        try:
+            await bot.http.bulk_upsert_guild_commands(bot.application_id, gid, [])
+            log.info("cleared old guild-scoped commands for guild %s", gid)
+        except Exception as exc:  # pragma: no cover - best effort
+            log.warning("could not clear guild commands for %s: %s", gid, exc)
+
 
 @bot.listen("on_interaction")
 async def _rsvp_listener(interaction: discord.Interaction) -> None:

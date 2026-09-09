@@ -46,16 +46,13 @@ const recordCommand = new SlashCommandBuilder()
 
 async function registerCommands() {
   const body = [recordCommand.toJSON()];
-  if (config.devGuildIds.length) {
-    for (const gid of config.devGuildIds) {
-      const g = await client.guilds.fetch(gid).catch(() => null);
-      if (g) await g.commands.set(body);
-    }
-    console.log(`Registered commands to guild(s): ${config.devGuildIds.join(", ")}`);
-  } else {
-    await client.application.commands.set(body);
-    console.log("Registered global commands");
+  await client.application.commands.set(body); // global => works in every server
+  // Clear any leftover guild-scoped commands from earlier dev registration.
+  for (const gid of config.devGuildIds) {
+    const g = await client.guilds.fetch(gid).catch(() => null);
+    if (g) await g.commands.set([]).catch(() => {});
   }
+  console.log("Registered global commands");
 }
 
 function pickVoiceChannel(interaction) {
