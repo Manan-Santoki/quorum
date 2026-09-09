@@ -8,6 +8,7 @@ import {
   EmbedBuilder,
   AttachmentBuilder,
   ChannelType,
+  MessageFlags,
 } from "discord.js";
 import { config } from "./config.js";
 import { RecordingSession } from "./recorder.js";
@@ -75,17 +76,17 @@ function pickVoiceChannel(interaction) {
 async function handleStart(interaction) {
   const guildId = interaction.guild.id;
   if (sessions.has(guildId)) {
-    return interaction.reply({ content: "Already recording in this server. Use `/record stop`.", ephemeral: true });
+    return interaction.reply({ content: "Already recording in this server. Use `/record stop`.", flags: MessageFlags.Ephemeral });
   }
   const voiceChannel = pickVoiceChannel(interaction);
   if (!voiceChannel) {
     return interaction.reply({
       content: "No one is in a voice channel. At least one person must join a voice channel first.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
   const eventId = interaction.options.getInteger("event_id");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   if (eventId != null && !(await eventBelongs(eventId, guildId))) {
     return interaction.editReply(`No event #${eventId} in this server.`);
@@ -132,9 +133,9 @@ async function handleStart(interaction) {
 async function handleStop(interaction) {
   const guildId = interaction.guild.id;
   if (!sessions.has(guildId)) {
-    return interaction.reply({ content: "I'm not recording in this server.", ephemeral: true });
+    return interaction.reply({ content: "I'm not recording in this server.", flags: MessageFlags.Ephemeral });
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await interaction.editReply("⏹️ Stopped. Transcribing and writing minutes… this can take a bit.");
   await finishRecording(guildId, interaction.channel);
 }
@@ -235,7 +236,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     console.error("command error:", e);
     const msg = `Something went wrong: \`${e.message}\``;
     if (interaction.deferred || interaction.replied) await interaction.editReply(msg).catch(() => {});
-    else await interaction.reply({ content: msg, ephemeral: true }).catch(() => {});
+    else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 });
 

@@ -1,14 +1,14 @@
 // Central configuration for the Scribe (Node) bot, read from the environment.
 // Mirrors the keys the Python side uses so a single .env drives the whole suite.
 
-function csvInts(v) {
+// Keep values as STRINGS — Discord snowflake IDs exceed JS's safe integer
+// range, so Number() silently rounds them to the wrong id.
+function csvStrings(v) {
   if (!v) return [];
   return v
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => Number(s))
-    .filter((n) => Number.isFinite(n));
+    .filter(Boolean);
 }
 
 // SQLAlchemy uses a `postgresql+psycopg://` URL; node-postgres needs a plain
@@ -21,7 +21,7 @@ function normalizePgUrl(url) {
 export const config = {
   databaseUrl: normalizePgUrl(process.env.DATABASE_URL || ""),
   token: process.env.DISCORD_TOKEN_SCRIBE || "",
-  devGuildIds: csvInts(process.env.DEV_GUILD_IDS).map(String),
+  devGuildIds: csvStrings(process.env.DEV_GUILD_IDS),
 
   transcribeProvider: (process.env.TRANSCRIBE_PROVIDER || "groq").toLowerCase(),
   groqApiKey: process.env.GROQ_API_KEY || "",
