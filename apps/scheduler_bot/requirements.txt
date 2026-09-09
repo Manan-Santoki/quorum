@@ -1,0 +1,8 @@
+# Scheduler-bot specific deps. quorum-shared (installed separately) brings
+# SQLAlchemy, psycopg, pydantic-settings, openai, google-api-client, icalendar.
+py-cord==2.8.1
+APScheduler==3.11.3
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-dateutil==2.9.0.post0
+tzdata==2025.2
