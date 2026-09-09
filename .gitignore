@@ -3,6 +3,10 @@
 secrets/
 *.json.key
 
+# Node
+node_modules/
+npm-debug.log*
+
 # Python
 __pycache__/
 *.py[cod]
