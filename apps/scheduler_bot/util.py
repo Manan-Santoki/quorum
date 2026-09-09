@@ -75,6 +75,8 @@ _DISPLAY_ZONES = [
     ("UTC", "UTC"),
     ("US-Pacific", "America/Los_Angeles"),
     ("US-Arizona", "America/Phoenix"),
+    ("US-Mountain", "America/Denver"),
+    ("US-Central", "America/Chicago"),
     ("US-Eastern", "America/New_York"),
     ("UK", "Europe/London"),
     ("C-Europe", "Europe/Paris"),
