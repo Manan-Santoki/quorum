@@ -167,13 +167,11 @@ class Events(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         title: str,
-        when: discord.Option(str, "Start time, e.g. '2026-09-12 15:00' or 'Friday 3pm'"),
-        duration: discord.Option(str, "e.g. 60, 1h, 1h30m", required=False, default="60"),
-        description: discord.Option(str, "Optional details", required=False, default=""),
-        location: discord.Option(str, "Optional location / link", required=False, default=""),
-        channel: discord.Option(
-            discord.TextChannel, "Where to post & remind (default: here)", required=False, default=None
-        ),
+        when: discord.Option(str, "Start time, e.g. '2026-09-12 15:00'"),
+        duration: discord.Option(str, "e.g. 60, 1h, 1h30m") = "60",
+        description: discord.Option(str, "Optional details") = "",
+        location: discord.Option(str, "Optional location / link") = "",
+        channel: discord.Option(discord.TextChannel, "Where to post & remind (default: here)") = None,
     ):
         await ctx.defer()
         tz = await asyncio.to_thread(_guild_tz, ctx.guild.id)

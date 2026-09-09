@@ -36,7 +36,7 @@ class Record(commands.Cog):
     async def start(
         self,
         ctx: discord.ApplicationContext,
-        event_id: discord.Option(int, "Link this recording to an event #", required=False, default=None),
+        event_id: discord.Option(int, "Link this recording to an event #") = None,
     ):
         if not (ctx.author.voice and ctx.author.voice.channel):
             await ctx.respond("Join a voice channel first, then run `/record start`.", ephemeral=True)
