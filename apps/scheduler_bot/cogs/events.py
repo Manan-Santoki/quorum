@@ -1,6 +1,10 @@
-"""Slash commands for events, RSVPs, and calendar linking."""
+"""Slash commands for events, RSVPs, and calendar linking.
 
-from __future__ import annotations
+NOTE: do NOT add `from __future__ import annotations` here. Pycord introspects
+the real annotation objects (discord.Option / discord.TextChannel) at runtime to
+build slash options; stringized annotations (PEP 563) break option typing and
+raise `issubclass() arg 1 must be a class` on invoke.
+"""
 
 import asyncio
 import secrets

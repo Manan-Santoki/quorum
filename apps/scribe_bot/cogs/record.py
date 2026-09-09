@@ -1,6 +1,8 @@
-"""/record slash commands: capture Discord voice and produce AI minutes."""
+"""/record slash commands: capture Discord voice and produce AI minutes.
 
-from __future__ import annotations
+NOTE: do NOT add `from __future__ import annotations` here — Pycord needs the
+real annotation objects at runtime to build the slash options.
+"""
 
 import asyncio
 import json
