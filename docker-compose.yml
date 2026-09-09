@@ -25,8 +25,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "${ICAL_PORT:-8080}:8080"   # iCal feed + /healthz
+    # Container port 8080 serves the iCal feed + /healthz. On Dokploy, attach a
+    # domain to this service (Traefik routes to 8080) and set PUBLIC_BASE_URL to
+    # it. For plain local self-host, add a `ports: ["8080:8080"]` override.
+    expose:
+      - "8080"
     volumes:
       - ./secrets:/secrets:ro       # optional Google service-account JSON
 
