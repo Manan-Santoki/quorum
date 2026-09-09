@@ -47,12 +47,14 @@ def _job_id(event_id: int, offset: int) -> str:
 
 
 def _guild_offsets(guild_offsets: str) -> list[int]:
+    base = settings.reminder_offsets
     if guild_offsets.strip():
         try:
-            return [int(x) for x in guild_offsets.split(",") if x.strip()]
+            base = [int(x) for x in guild_offsets.split(",") if x.strip()]
         except ValueError:
-            pass
-    return settings.reminder_offsets
+            base = settings.reminder_offsets
+    # Always include a 30-minutes-before reminder (it @-mentions attendees).
+    return sorted(set(base) | {30}, reverse=True)
 
 
 def schedule_event_reminders(
