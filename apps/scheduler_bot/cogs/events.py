@@ -255,40 +255,32 @@ class Events(commands.Cog):
         ]
         await ctx.respond("\n".join(lines), ephemeral=True)
 
-    @event.command(name="cancel", description="Cancel a meeting")
-    async def cancel(self, ctx: discord.ApplicationContext, event_id: int):
-        await ctx.defer(ephemeral=True)
+    @event.command(name="cancel", description="Cancel a meeting (pick from a list)")
+    async def cancel(self, ctx: discord.ApplicationContext):
+        def _load():
+            from datetime import datetime, timezone
 
-        def _cancel() -> tuple[bool, str | None, str, int | None, int | None]:
             with session_scope() as s:
-                ev = s.get(Event, event_id)
-                if ev is None or ev.guild_id != ctx.guild.id:
-                    return False, None, "", None, None
-                ev.cancelled = True
-                gs = _get_or_create_settings(s, ev.guild_id)
-                if ev.gcal_event_id and gs.gcal_id:
-                    gcal.delete_event(gs.gcal_id, ev.gcal_event_id)
-                return True, gs.reminder_offsets, ev.channel_id, ev.announce_message_id, ev.channel_id
+                gs = _get_or_create_settings(s, ctx.guild.id)
+                rows = (
+                    s.query(Event)
+                    .filter(
+                        Event.guild_id == ctx.guild.id,
+                        Event.cancelled == False,  # noqa: E712
+                        Event.end_at >= datetime.now(timezone.utc),
+                    )
+                    .order_by(Event.start_at)
+                    .limit(25)  # Discord select caps at 25 options
+                    .all()
+                )
+                return [(e.id, e.title, fmt_local(e.start_at, gs.timezone)) for e in rows]
 
-        ok, offsets, _chan, msg_id, chan_id = await asyncio.to_thread(_cancel)
-        if not ok:
-            await ctx.respond(f"No event #{event_id} in this server.", ephemeral=True)
+        events = await asyncio.to_thread(_load)
+        if not events:
+            await ctx.respond("No upcoming events to cancel.", ephemeral=True)
             return
-        reminders.cancel_event_reminders(event_id, offsets or "")
-
-        # Best-effort: strike through the announcement.
-        if msg_id and chan_id:
-            try:
-                ch = self.bot.get_channel(chan_id) or await self.bot.fetch_channel(chan_id)
-                msg = await ch.fetch_message(msg_id)
-                if msg.embeds:
-                    e = msg.embeds[0]
-                    e.color = discord.Color.dark_gray()
-                    e.title = "❌ [Cancelled] " + (e.title or "")
-                    await msg.edit(embed=e, view=None)
-            except discord.HTTPException:
-                pass
-        await ctx.respond(f"🗑️ Cancelled event #{event_id}.", ephemeral=True)
+        view = CancelEventView(events, ctx.guild.id, ctx.author.id, self.bot)
+        await ctx.respond("Select an event to cancel:", view=view, ephemeral=True)
 
     @calendar.command(name="link", description="Link a Google Calendar (share it with the service account first)")
     async def link(self, ctx: discord.ApplicationContext, calendar_id: str):
@@ -516,6 +508,74 @@ class EventCreateView(discord.ui.View):
             ),
             view=None,
         )
+
+
+async def cancel_event(bot: discord.Bot, guild_id: int, event_id: int) -> tuple[bool, str]:
+    """Cancel an event: mark cancelled, drop reminders, remove from Google, strike embed."""
+
+    def _cancel():
+        with session_scope() as s:
+            ev = s.get(Event, event_id)
+            if ev is None or ev.guild_id != guild_id or ev.cancelled:
+                return None
+            ev.cancelled = True
+            title = ev.title
+            gs = _get_or_create_settings(s, ev.guild_id)
+            if ev.gcal_event_id and gs.gcal_id:
+                gcal.delete_event(gs.gcal_id, ev.gcal_event_id)
+            return title, gs.reminder_offsets, ev.announce_message_id, ev.channel_id
+
+    res = await asyncio.to_thread(_cancel)
+    if res is None:
+        return False, ""
+    title, offsets, msg_id, chan_id = res
+    reminders.cancel_event_reminders(event_id, offsets or "")
+
+    if msg_id and chan_id:
+        try:
+            ch = bot.get_channel(chan_id) or await bot.fetch_channel(chan_id)
+            msg = await ch.fetch_message(msg_id)
+            if msg.embeds:
+                e = msg.embeds[0]
+                e.color = discord.Color.dark_gray()
+                e.title = "❌ [Cancelled] " + (e.title or "")
+                await msg.edit(embed=e, view=None)
+        except discord.HTTPException:
+            pass
+    return True, title
+
+
+class CancelEventView(discord.ui.View):
+    """Ephemeral dropdown to pick an upcoming event to cancel."""
+
+    def __init__(self, events, guild_id, author_id, bot):
+        super().__init__(timeout=120)
+        self.guild_id = guild_id
+        self.author_id = author_id
+        self.bot = bot
+        opts = [
+            discord.SelectOption(label=f"#{eid}: {title}"[:100], description=when[:100], value=str(eid))
+            for eid, title, when in events
+        ]
+        self.sel = discord.ui.Select(placeholder="Pick an event to cancel", options=opts)
+        self.sel.callback = self._on_select
+        self.add_item(self.sel)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the person who ran the command can use this.", ephemeral=True
+            )
+            return
+        event_id = int(self.sel.values[0])
+        await interaction.response.defer()
+        ok, title = await cancel_event(self.bot, self.guild_id, event_id)
+        self.disable_all_items()
+        self.stop()
+        content = (
+            f"🗑️ Cancelled **{title}** (event #{event_id})." if ok else "That event is no longer available."
+        )
+        await interaction.edit_original_response(content=content, view=None)
 
 
 def setup(bot: discord.Bot) -> None:
